@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Bengaluru 3D</title>
+  <style>
+    body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+    canvas { display: block; }
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      background: rgba(0,0,0,0.8);
+      padding: 15px;
+      border-radius: 5px;
+      font-size: 14px;
+      z-index: 1000;
+    }
+    #controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.8);
+      padding: 15px;
+      border-radius: 5px;
+      color: white;
+      z-index: 1000;
+    }
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0,0,0,0.9);
+      padding: 30px;
+      border-radius: 10px;
+      color: white;
+      font-size: 18px;
+      z-index: 2000;
+    }
+    .progress-bar {
+      width: 300px;
+      height: 20px;
+      background: #333;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4CAF50, #8BC34A);
+      width: 0%;
+      transition: width 0.3s;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <div>Loading Bengaluru Buildings...</div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progress"></div>
+    </div>
+    <div id="loadingText" style="margin-top: 10px; font-size: 14px;">Initializing...</div>
+  </div>
+  
+  <div id="info">
+    <div>Buildings: <span id="buildingCount">0</span></div>
+    <div>FPS: <span id="fps">60</span></div>
+    <div>GPU: RTX 3070</div>
+  </div>
+  
+  <div id="controls">
+    <div><strong>Controls:</strong></div>
+    <div>🖱️ Drag: Pan camera</div>
+    <div>🎡 Scroll: Zoom in/out</div>
+    <div>Arrow Keys: Move</div>
+    <div>Q/E: Rotate view</div>
+  </div>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  
+  <script>
+    let scene, camera, renderer, buildings = [];
+    const BENGALURU_LAT = 12.9716;
+    const BENGALURU_LON = 77.5946;
+    let frameCount = 0;
+    let lastTime = performance.now();
+    let cameraRotation = 0;
+    
+    // Optimization settings
+    const CHUNK_SIZE = 100; // Load 100 buildings at a time
+    const MAX_BUILDINGS = 10000; // Limit total buildings
+    const LOD_DISTANCE = 1000; // Distance for level of detail
+    
+    function init() {
+      // Scene setup
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x87ceeb);
+      scene.fog = new THREE.Fog(0x87ceeb, 1000, 5000);
+      
+      // Camera setup
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 10000);
+      camera.position.set(0, 800, 1200);
+      camera.lookAt(0, 0, 0);
+      
+      // Renderer setup with GPU optimization
+      renderer = new THREE.WebGLRenderer({ 
+        antialias: true,
+        powerPreference: "high-performance",
+        precision: "highp"
+      });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit to 2x for performance
+      renderer.shadowMap.enabled = false; // Disable shadows for better performance
+      document.body.appendChild(renderer.domElement);
+      
+      // Lighting
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+      scene.add(ambientLight);
+      
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+      dirLight.position.set(1000, 2000, 1000);
+      scene.add(dirLight);
+      
+      // Ground plane
+      const groundGeometry = new THREE.PlaneGeometry(20000, 20000);
+      const groundMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0x90ee90,
+        roughness: 0.8
+      });
+      const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+      ground.rotation.x = -Math.PI / 2;
+      scene.add(ground);
+      
+      // Grid helper
+      const gridHelper = new THREE.GridHelper(10000, 50, 0x000000, 0x333333);
+      scene.add(gridHelper);
+      
+      // Load building data
+      loadBuildingData();
+      
+      // Controls
+      setupControls();
+      
+      // Animation loop
+      animate();
+      
+      window.addEventListener('resize', onWindowResize);
+    }
+    
+    async function loadBuildingData() {
+      try {
+        updateLoadingText('Fetching data...');
+        
+        // Try multiple file names
+        let response;
+        const filesToTry = [
+          '/data/bengaluru-buildings.geojson'
+        ];
+        
+        for (const file of filesToTry) {
+          try {
+            response = await fetch(file);
+            if (response.ok) break;
+          } catch (e) {
+            continue;
+          }
+        }
+        
+        if (!response || !response.ok) {
+          throw new Error('No data file found. Please download the data first.');
+        }
+        
+        updateLoadingText('Parsing data...');
+        const data = await response.json();
+        
+        // Handle both GeoJSON and Overpass JSON formats
+        let features = [];
+        if (data.type === 'FeatureCollection') {
+          features = data.features;
+        } else if (data.elements) {
+          // Convert Overpass format to features
+          features = convertOverpassToFeatures(data.elements);
+        }
+        
+        updateLoadingText(`Processing ${features.length} buildings...`);
+        
+        // Limit number of buildings
+        features = features.slice(0, MAX_BUILDINGS);
+        
+        // Load buildings in chunks to prevent browser crash
+        await loadBuildingsInChunks(features);
+        
+        hideLoading();
+        
+      } catch (error) {
+        console.error('Error loading buildings:', error);
+        document.getElementById('loadingText').textContent = 
+          `Error: ${error.message}\n\nPlease ensure you've downloaded the data file.`;
+      }
+    }
+    
+    function convertOverpassToFeatures(elements) {
+      const features = [];
+      
+      elements.forEach(element => {
+        if (element.type === 'way' && element.geometry) {
+          features.push({
+            type: 'Feature',
+            properties: element.tags || {},
+            geometry: {
+              type: 'Polygon',
+              coordinates: [element.geometry.map(node => [node.lon, node.lat])]
+            }
+          });
+        }
+      });
+      
+      return features;
+    }
+    
+    async function loadBuildingsInChunks(features) {
+      const totalChunks = Math.ceil(features.length / CHUNK_SIZE);
+      
+      for (let i = 0; i < totalChunks; i++) {
+        const chunk = features.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        
+        chunk.forEach(feature => {
+          if (feature.geometry && 
+              (feature.geometry.type === 'Polygon' || 
+               feature.geometry.type === 'MultiPolygon')) {
+            createBuilding(feature);
+          }
+        });
+        
+        // Update progress
+        const progress = ((i + 1) / totalChunks) * 100;
+        document.getElementById('progress').style.width = progress + '%';
+        updateLoadingText(`Loaded ${Math.min((i + 1) * CHUNK_SIZE, features.length)} / ${features.length} buildings`);
+        
+        // Let browser breathe between chunks
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      
+      document.getElementById('buildingCount').textContent = buildings.length;
+    }
+    
+    function latLonToXY(lat, lon) {
+      const scale = 100000;
+      const x = (lon - BENGALURU_LON) * scale;
+      const y = (lat - BENGALURU_LAT) * scale;
+      return { x, y };
+    }
+    
+    function createBuilding(feature) {
+      const props = feature.properties || {};
+      const height = parseFloat(props.height) || 
+                     parseInt(props['building:levels']) * 3.5 ||
+                     parseInt(props.levels) * 3.5 ||
+                     (Math.random() * 20 + 10); // Random height if not specified
+      
+      let coordinates = feature.geometry.coordinates;
+      if (feature.geometry.type === 'MultiPolygon') {
+        coordinates = coordinates[0];
+      }
+      
+      // Skip if too few points
+      if (!coordinates[0] || coordinates[0].length < 3) return;
+      
+      const points = coordinates[0].map(coord => {
+        const { x, y } = latLonToXY(coord[1], coord[0]);
+        return new THREE.Vector2(x, y);
+      });
+      
+      try {
+        const shape = new THREE.Shape(points);
+        const extrudeSettings = {
+          depth: height,
+          bevelEnabled: false
+        };
+        
+        const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        
+        // Random building colors
+        const colors = [0xcccccc, 0xb8b8b8, 0xa0a0a0, 0xd4d4d4];
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        
+        const material = new THREE.MeshLambertMaterial({ 
+          color: color,
+          flatShading: true
+        });
+        
+        const building = new THREE.Mesh(geometry, material);
+        building.rotation.x = Math.PI / 2;
+        
+        scene.add(building);
+        buildings.push(building);
+        
+      } catch (error) {
+        console.warn('Failed to create building:', error);
+      }
+    }
+    
+    function setupControls() {
+      let isDragging = false;
+      let previousMousePosition = { x: 0, y: 0 };
+      
+      document.addEventListener('mousedown', (e) => {
+        isDragging = true;
+      });
+      
+      document.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+          const deltaX = e.clientX - previousMousePosition.x;
+          const deltaY = e.clientY - previousMousePosition.y;
+          
+          camera.position.x -= deltaX * 3;
+          camera.position.z -= deltaY * 3;
+        }
+        previousMousePosition = { x: e.clientX, y: e.clientY };
+      });
+      
+      document.addEventListener('mouseup', () => {
+        isDragging = false;
+      });
+      
+      document.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        camera.position.y += e.deltaY * 0.8;
+        camera.position.y = Math.max(50, Math.min(3000, camera.position.y));
+      }, { passive: false });
+      
+      // Keyboard controls
+      const keys = {};
+      document.addEventListener('keydown', (e) => keys[e.key] = true);
+      document.addEventListener('keyup', (e) => keys[e.key] = false);
+      
+      setInterval(() => {
+        const speed = 20;
+        if (keys['ArrowUp'] || keys['w']) camera.position.z -= speed;
+        if (keys['ArrowDown'] || keys['s']) camera.position.z += speed;
+        if (keys['ArrowLeft'] || keys['a']) camera.position.x -= speed;
+        if (keys['ArrowRight'] || keys['d']) camera.position.x += speed;
+        if (keys['q']) cameraRotation -= 0.02;
+        if (keys['e']) cameraRotation += 0.02;
+      }, 16);
+    }
+    
+    function animate() {
+      requestAnimationFrame(animate);
+      
+      // Update camera rotation
+      const distance = Math.sqrt(camera.position.x ** 2 + camera.position.z ** 2);
+      camera.position.x = distance * Math.sin(cameraRotation);
+      camera.position.z = distance * Math.cos(cameraRotation);
+      camera.lookAt(0, 0, 0);
+      
+      renderer.render(scene, camera);
+      
+      // Update FPS counter
+      frameCount++;
+      const currentTime = performance.now();
+      if (currentTime >= lastTime + 1000) {
+        document.getElementById('fps').textContent = frameCount;
+        frameCount = 0;
+        lastTime = currentTime;
+      }
+    }
+    
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+    
+    function updateLoadingText(text) {
+      document.getElementById('loadingText').textContent = text;
+    }
+    
+    function hideLoading() {
+      document.getElementById('loading').style.display = 'none';
+    }
+    
+    init();
+  </script>
+</body>
+</html>

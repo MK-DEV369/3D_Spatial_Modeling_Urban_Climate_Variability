@@ -1,0 +1,2 @@
+# ClimaX integration package
+

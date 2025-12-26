@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  </head>
+  <body>
+    <div id="cesiumContainer" style="width:100%; height:100vh;"></div>
+    <script>
+      const viewer = new Cesium.Viewer("cesiumContainer");
+
+      // Load local GeoJSON
+      Cesium.GeoJsonDataSource.load("/data/bengaluru-buildings.geojson")
+        .then((dataSource) => {
+          viewer.dataSources.add(dataSource);
+          viewer.zoomTo(dataSource);
+        });
+    </script>
+  </body>
+</html>
