@@ -11,6 +11,22 @@ Final_Project/
 └── Bengaluru_OSMB/       # Existing OSM data processing scripts
 ```
 
+## OSM Data Download (Context)
+
+This project uses OpenStreetMap (OSM) data for southern India to provide detailed building and infrastructure information for urban climate modeling. The OSM data can be downloaded from the official Geofabrik portal:
+
+- [Geofabrik Asia/India OSM extracts](https://download.geofabrik.de/asia/india/)
+
+For this project, the file `southern-zone.osm.pbf` was downloaded to represent the southern region of India. This file is used as a data source for further processing and integration into the backend and ML pipelines.
+
+Example download command:
+
+```bash
+wget https://download.geofabrik.de/asia/india/south-india-latest.osm.pbf -O southern-zone.osm.pbf
+```
+
+Place the downloaded file in the project root or the appropriate data directory as required by your workflow.
+
 ## Prerequisites
 
 - Python 3.10+
