@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.contrib.gis.admin import OSMGeoAdmin
-from .models import City, Building, ClimateData, TrafficData, PollutionData, Scenario, Prediction
+from .models import City, ClimateData, TrafficData, PollutionData, Scenario, Prediction
+# Note: Building model removed - use maps.models.BuildingsOSM instead (registered in maps/admin.py)
 
 
 @admin.register(City)
@@ -8,12 +9,7 @@ class CityAdmin(OSMGeoAdmin):
     list_display = ('name', 'country', 'created_at')
     search_fields = ('name', 'country')
 
-
-@admin.register(Building)
-class BuildingAdmin(OSMGeoAdmin):
-    list_display = ('osm_id', 'city', 'building_type', 'height')
-    list_filter = ('city', 'building_type')
-    search_fields = ('osm_id', 'city__name')
+# BuildingAdmin removed - use maps.admin.BuildingsOSMAdmin instead
 
 
 @admin.register(ClimateData)

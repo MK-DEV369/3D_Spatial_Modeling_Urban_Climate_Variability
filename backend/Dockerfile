@@ -5,6 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gdal-bin \
@@ -12,12 +13,21 @@ RUN apt-get update && apt-get install -y \
     libgeos-dev \
     libproj-dev \
     postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/lib/x86_64-linux-gnu/libgdal.so
 
-# Set GDAL environment variables
+
+
+
+# Add symlink for GEOS compatibility (libgeos_c.so)
+RUN ln -sf /usr/lib/x86_64-linux-gnu/libgeos_c.so /usr/lib/x86_64-linux-gnu/libgeos.so
+
+# Set GDAL and GEOS environment variables for Django GIS (override for both locations)
 ENV GDAL_CONFIG=/usr/bin/gdal-config \
     CPLUS_INCLUDE_PATH=/usr/include/gdal \
-    C_INCLUDE_PATH=/usr/include/gdal
+    C_INCLUDE_PATH=/usr/include/gdal \
+    GDAL_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/libgdal.so \
+    GEOS_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/libgeos_c.so
 
 # Create app directory
 WORKDIR /app

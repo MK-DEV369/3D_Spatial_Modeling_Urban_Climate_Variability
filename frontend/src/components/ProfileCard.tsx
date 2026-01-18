@@ -21,16 +21,18 @@ interface ProfileCardProps {
   contactText?: string;
   showUserInfo?: boolean;
   onContactClick?: () => void;
+  linkedinUrl?: string;
+  githubUrl?: string;
 }
 
-const DEFAULT_INNER_GRADIENT = 'linear-gradient(145deg,#60496e8c 0%,#71C4FF44 100%)';
+const DEFAULT_INNER_GRADIENT = 'linear-gradient(145deg,#1a1a2e40 0%,#16213e30 100%)';
 
 const ANIMATION_CONFIG = {
-  INITIAL_DURATION: 1200,
-  INITIAL_X_OFFSET: 70,
-  INITIAL_Y_OFFSET: 60,
+  INITIAL_DURATION: 1800,
+  INITIAL_X_OFFSET: 50,
+  INITIAL_Y_OFFSET: 50,
   DEVICE_BETA_OFFSET: 20,
-  ENTER_TRANSITION_MS: 180
+  ENTER_TRANSITION_MS: 250
 } as const;
 
 const clamp = (v: number, min = 0, max = 100): number => Math.min(Math.max(v, min), max);
@@ -50,14 +52,13 @@ const ProfileCardComponent: React.FC<ProfileCardProps> = ({
   enableTilt = true,
   enableMobileTilt = false,
   mobileTiltSensitivity = 5,
-  miniAvatarUrl,
   name = 'Javi A. Torres',
   title = 'Software Engineer',
   handle = 'javicodes',
-  status = 'Online',
-  contactText = 'Contact',
   showUserInfo = true,
-  onContactClick
+  onContactClick,
+  linkedinUrl,
+  githubUrl
 }) => {
   const wrapRef = useRef<HTMLDivElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -350,32 +351,36 @@ const ProfileCardComponent: React.FC<ProfileCardProps> = ({
               {showUserInfo && (
                 <div className="pc-user-info">
                   <div className="pc-user-details">
-                    <div className="pc-mini-avatar">
-                      <img
-                        src={miniAvatarUrl || avatarUrl}
-                        alt={`${name || 'User'} mini avatar`}
-                        loading="lazy"
-                        onError={e => {
-                          const t = e.target as HTMLImageElement;
-                          t.style.opacity = '0.5';
-                          t.src = avatarUrl;
-                        }}
-                      />
-                    </div>
                     <div className="pc-user-text">
-                      <div className="pc-handle">@{handle}</div>
-                      <div className="pc-status">{status}</div>
+                      <div className="pc-handle">{handle}</div>
                     </div>
                   </div>
-                  <button
-                    className="pc-contact-btn"
-                    onClick={handleContactClick}
-                    style={{ pointerEvents: 'auto' }}
-                    type="button"
-                    aria-label={`Contact ${name || 'user'}`}
-                  >
-                    {contactText}
-                  </button>
+                  <div className="flex gap-2 justify-center">
+                    {linkedinUrl && (
+                      <a
+                        href={linkedinUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded transition-colors"
+                        title="LinkedIn"
+                        style={{ pointerEvents: 'auto' }}
+                      >
+                        LinkedIn
+                      </a>
+                    )}
+                    {githubUrl && (
+                      <a
+                        href={githubUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center px-4 py-2 bg-gray-700 hover:bg-gray-800 text-white text-sm font-semibold rounded transition-colors"
+                        title="GitHub"
+                        style={{ pointerEvents: 'auto' }}
+                      >
+                        GitHub
+                      </a>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

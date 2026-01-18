@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from rest_framework_gis.serializers import GeoFeatureModelSerializer
-from core.models import City, Building, ClimateData, TrafficData, PollutionData, Scenario, Prediction
+from core.models import City, ClimateData, TrafficData, PollutionData, Scenario, Prediction
+# Note: Building model removed - use maps.models.BuildingsOSM instead
 
 
 class CitySerializer(serializers.ModelSerializer):
@@ -9,13 +10,8 @@ class CitySerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'country', 'latitude', 'longitude', 'bounds', 'metadata', 'created_at']
 
 
-class BuildingSerializer(GeoFeatureModelSerializer):
-    city_name = serializers.CharField(source='city.name', read_only=True)
-
-    class Meta:
-        model = Building
-        geo_field = 'geometry'
-        fields = ['id', 'osm_id', 'city', 'city_name', 'building_type', 'height', 'metadata']
+# BuildingSerializer removed - use maps.serializers.BuildingsOSMSerializer instead
+# The Building model in core.models is deprecated in favor of maps.models.BuildingsOSM
 
 
 class ClimateDataSerializer(serializers.ModelSerializer):

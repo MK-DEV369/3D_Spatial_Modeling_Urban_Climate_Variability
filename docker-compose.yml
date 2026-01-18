@@ -71,6 +71,7 @@ services:
       - urban_climate_network
     gpus: all
 
+
   # Celery worker for async tasks
   celery:
     build:
@@ -78,6 +79,35 @@ services:
       dockerfile: Dockerfile
     container_name: urban_climate_celery
     command: celery -A urban_climate worker --loglevel=info
+    environment:
+      - DEBUG=True
+      - SECRET_KEY=django-insecure-docker-dev-key-change-in-production
+      - DB_ENGINE=django.contrib.gis.db.backends.postgis
+      - DB_NAME=urban_climate
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=db
+      - DB_PORT=5432
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379/1
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - db
+      - redis
+      - backend
+    networks:
+      - urban_climate_network
+    gpus: all
+
+  # Celery beat for periodic tasks
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: urban_climate_celery_beat
+    command: celery -A urban_climate beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     environment:
       - DEBUG=True
       - SECRET_KEY=django-insecure-docker-dev-key-change-in-production

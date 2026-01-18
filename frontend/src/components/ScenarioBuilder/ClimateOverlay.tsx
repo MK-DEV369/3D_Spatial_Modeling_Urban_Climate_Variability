@@ -1,11 +1,4 @@
-import { useMemo } from 'react'
-import * as THREE from 'three'
 import { ClimateData } from '../../types/climate'
-
-interface ClimateOverlayProps {
-  climateData?: ClimateData[]
-  overlayType?: 'temperature' | 'humidity' | 'precipitation'
-}
 
 // Color mapping function for temperature
 const getTemperatureColor = (temp: number): string => {
@@ -50,43 +43,34 @@ const getHumidityColor = (humidity: number): string => {
   return `rgb(${r}, ${g}, ${b})`
 }
 
-// Color mapping for precipitation (blue to dark blue)
-const getPrecipitationColor = (precipitation: number): string => {
-  const normalized = Math.max(0, Math.min(1, precipitation / 100))
-  const r = Math.floor(0)
-  const g = Math.floor(100 + normalized * 100)
-  const b = Math.floor(200 + normalized * 55)
+// Color mapping for precipitation (purple to blue gradient)
+const getPrecipitationColor = (precip: number): string => {
+  const normalized = Math.max(0, Math.min(1, precip / 50)) // Assuming 0-50mm range
+  const r = Math.floor(200 - normalized * 100)
+  const g = Math.floor(100)
+  const b = Math.floor(255)
   return `rgb(${r}, ${g}, ${b})`
 }
 
-export function getClimateColor(
-  climateData: ClimateData | undefined,
-  overlayType: 'temperature' | 'humidity' | 'precipitation' = 'temperature'
-): string {
-  if (!climateData) {
-    return '#8B9DC3' // Default gray-blue
-  }
+// Main function to get color based on overlay type
+export const getClimateColor = (
+  climate: ClimateData | undefined,
+  overlayType: 'temperature' | 'humidity' | 'precipitation'
+): string => {
+  if (!climate) return '#808080' // Gray default
 
   switch (overlayType) {
     case 'temperature':
-      return getTemperatureColor(climateData.temperature)
+      return getTemperatureColor(climate.temperature)
     case 'humidity':
-      return getHumidityColor(climateData.humidity || 0)
+      return getHumidityColor(climate.humidity || 50)
     case 'precipitation':
-      return getPrecipitationColor(climateData.precipitation || 0)
+      return getPrecipitationColor(climate.precipitation || 0)
     default:
-      return '#8B9DC3'
+      return '#808080'
   }
 }
 
-export default function ClimateOverlay({ climateData, overlayType = 'temperature' }: ClimateOverlayProps) {
-  const latestClimate = useMemo(() => {
-    if (!climateData || climateData.length === 0) return undefined
-    return climateData[0] // Most recent data point
-  }, [climateData])
-
-  // This component is mainly for utility functions
-  // The actual color application happens in BuildingMesh
-  return null
+export default function ClimateOverlay() {
+  return null // This is a utility component, no rendering
 }
-

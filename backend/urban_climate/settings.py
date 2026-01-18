@@ -110,11 +110,14 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'django.contrib.gis',
+    'django.contrib.gis',  # GeoDjango for PostGIS support
     'rest_framework',
+    'rest_framework_gis', # REST Framework GIS support
     'corsheaders',
-    'core',
-    'api',
+    # Project apps
+    'core',  # Core models and business logic
+    'api',   # REST API endpoints
+    'maps',
 ]
 
 MIDDLEWARE = [
@@ -150,14 +153,25 @@ WSGI_APPLICATION = 'urban_climate.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
+# PostGIS database configuration for spatial queries
+# Database schema includes:
+#   - buildings_osm (geom: PostGIS geometry SRID 3857, active, scenario_id, modified_at, GIST index)
+#   - roads_osm (geom: PostGIS geometry SRID 3857, active, scenario_id, modified_at, GIST index)
+#   - water_osm (geom: PostGIS geometry SRID 3857, active, scenario_id, modified_at, GIST index)
+#   - green_osm (geom: PostGIS geometry SRID 3857, active, scenario_id, modified_at, GIST index)
 DATABASES = {
     'default': {
         'ENGINE': 'django.contrib.gis.db.backends.postgis',
-        'NAME': DB_NAME_ENV,
-        'USER': DB_USER_ENV,
+        'NAME': DB_NAME_ENV,  # 'urban_climate'
+        'USER': DB_USER_ENV,  # 'postgres'
         'PASSWORD': DB_PASSWORD_ENV,
         'HOST': DB_HOST_ENV,
         'PORT': DB_PORT_ENV,
+        'OPTIONS': {
+            'options': '-c search_path=public',
+        },
+        # Connection pooling for better performance
+        'CONN_MAX_AGE': 600,  # 10 minutes
     }
 }
 
@@ -245,3 +259,23 @@ CACHES = {
     }
 }
 
+# GPU/CUDA Configuration for ML Models (RTX 3070)
+# These settings help optimize GPU usage and reduce CPU load
+USE_GPU = env.bool('USE_GPU', default=True)  # Enable GPU for ML models
+CUDA_VISIBLE_DEVICES = env('CUDA_VISIBLE_DEVICES', default='0')  # Use first GPU (RTX 3070)
+
+# PyTorch CUDA settings (if using PyTorch models)
+# Set to use CUDA and optimize for RTX 3070
+# os is already imported at the top of the file
+if USE_GPU and 'CUDA_VISIBLE_DEVICES' not in os.environ:
+    os.environ['CUDA_VISIBLE_DEVICES'] = CUDA_VISIBLE_DEVICES
+
+# JAX GPU settings (for GraphCast)
+# JAX will automatically use GPU if CUDA is available
+# For optimal performance, ensure JAX is installed with CUDA 12 support:
+# pip install --upgrade "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+
+# Performance optimization for ML inference
+ML_MODEL_DEVICE = env('ML_MODEL_DEVICE', default='cuda' if USE_GPU else 'cpu')
+ML_BATCH_SIZE = env.int('ML_BATCH_SIZE', default=32)  # Batch size for GPU inference
+ML_USE_MIXED_PRECISION = env.bool('ML_USE_MIXED_PRECISION', default=True)  # Use FP16 for faster inference

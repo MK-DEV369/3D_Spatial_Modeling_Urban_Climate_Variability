@@ -47,20 +47,22 @@ export default function BuildingMesh({
         
         // Create shape from exterior ring
         const shape = new THREE.Shape()
-        const firstPoint = exteriorRing[0]
+        const firstPoint = exteriorRing[0] as number[]
         shape.moveTo(firstPoint[0], firstPoint[1])
         
         for (let i = 1; i < exteriorRing.length; i++) {
-          shape.lineTo(exteriorRing[i][0], exteriorRing[i][1])
+          const point = exteriorRing[i] as number[]
+          shape.lineTo(point[0], point[1])
         }
 
         // Add holes for interior rings
-        const holes = interiorRings.map(ring => {
+        interiorRings.map(ring => {
           const hole = new THREE.Path()
-          const firstHolePoint = ring[0]
+          const firstHolePoint = ring[0] as number[]
           hole.moveTo(firstHolePoint[0], firstHolePoint[1])
           for (let i = 1; i < ring.length; i++) {
-            hole.lineTo(ring[i][0], ring[i][1])
+            const point = ring[i] as number[]
+            hole.lineTo(point[0], point[1])
           }
           return hole
         })
@@ -96,4 +98,3 @@ export default function BuildingMesh({
 
   return <>{meshes}</>
 }
-

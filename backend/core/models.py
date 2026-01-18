@@ -24,28 +24,9 @@ class City(models.Model):
         return f"{self.name}, {self.country}"
 
 
-class Building(models.Model):
-    """
-    Model representing a building from OSM data.
-    Uses PostGIS geometry for spatial queries.
-    """
-    osm_id = models.BigIntegerField(unique=True, help_text="OpenStreetMap ID")
-    city = models.ForeignKey(City, on_delete=models.CASCADE, related_name='buildings')
-    geometry = models.MultiPolygonField(help_text="Building footprint geometry")
-    building_type = models.CharField(max_length=100, blank=True, help_text="Type of building (residential, commercial, etc.)")
-    height = models.FloatField(null=True, blank=True, help_text="Building height in meters")
-    metadata = models.JSONField(default=dict, blank=True, help_text="Additional building metadata from OSM")
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['osm_id']
-        indexes = [
-            models.Index(fields=['city', 'building_type']),
-            models.Index(fields=['osm_id']),
-        ]
-
-    def __str__(self):
-        return f"Building {self.osm_id} ({self.city.name})"
+# Building model removed - use maps.models.BuildingsOSM instead
+# The BuildingsOSM model uses the buildings_osm table directly and supports
+# scenario-based rendering, active flags, and PostGIS geometry (SRID 3857)
 
 
 class ClimateData(models.Model):

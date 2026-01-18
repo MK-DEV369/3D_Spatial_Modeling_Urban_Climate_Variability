@@ -1,8 +1,9 @@
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
-from core.models import City, Building, ClimateData, TrafficData, PollutionData, Scenario, Prediction
+from core.models import City, ClimateData, TrafficData, PollutionData, Scenario, Prediction
+# Note: Building model removed - use maps.models.BuildingsOSM instead
 from core.services.climate_service import (
     generate_weather_forecast,
     generate_climate_projection,
@@ -28,10 +29,26 @@ from core.tasks import (
     generate_pollution_prediction_task,
 )
 from .serializers import (
-    CitySerializer, BuildingSerializer, ClimateDataSerializer,
+    CitySerializer, ClimateDataSerializer,
     TrafficDataSerializer, PollutionDataSerializer, ScenarioSerializer,
     PredictionSerializer
 )
+
+
+@api_view(['GET'])
+def api_root(request, format=None):
+    """
+    API root endpoint listing all available endpoints.
+    """
+    return Response({
+        'cities': 'http://localhost:8000/api/cities/',
+        'scenarios': 'http://localhost:8000/api/scenarios/',
+        'predictions': 'http://localhost:8000/api/predictions/',
+        'buildings': 'http://localhost:8000/api/buildings/',
+        'roads': 'http://localhost:8000/api/roads/',
+        'water': 'http://localhost:8000/api/water/',
+        'green': 'http://localhost:8000/api/green/',
+    })
 
 
 class CityViewSet(viewsets.ReadOnlyModelViewSet):
@@ -41,19 +58,8 @@ class CityViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = City.objects.all()
     serializer_class = CitySerializer
 
-    @action(detail=True, methods=['get'])
-    def buildings(self, request, pk=None):
-        """
-        Get buildings for a specific city.
-        Returns GeoJSON format.
-        """
-        city = self.get_object()
-        buildings = Building.objects.filter(city=city)
-        serializer = BuildingSerializer(buildings, many=True)
-        return Response({
-            'type': 'FeatureCollection',
-            'features': serializer.data
-        })
+    # Buildings endpoint removed - use /api/buildings/ instead from maps app
+    # The Building model in core.models is deprecated in favor of maps.models.BuildingsOSM
 
     @action(detail=True, methods=['get'])
     def climate(self, request, pk=None):
@@ -436,4 +442,3 @@ class PredictionViewSet(viewsets.ReadOnlyModelViewSet):
                 'prediction': prediction,
                 'predictions_created': len(predictions),
             }, status=status.HTTP_200_OK)
-
