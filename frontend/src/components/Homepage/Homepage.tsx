@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import FadeIn from '../reactbits/Animations/FadeIn';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import Silk from '../ui/Slik';
+import Silk from '@/components/ui/Silk';
 import ProfileCard from '../ProfileCard';
 import VariableProximity from '../VariableProximity';
 import Morya from "../Logos/Morya.svg";

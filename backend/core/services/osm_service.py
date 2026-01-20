@@ -10,7 +10,8 @@ import logging
 from typing import List, Dict, Optional
 from django.contrib.gis.geos import MultiPolygon, Polygon, GEOSGeometry
 from django.db import transaction
-from core.models import City, Building
+from core.models import City
+from maps.models import BuildingsOSM as Building
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,11 @@ def process_osm_element(element: Dict) -> Optional[Dict]:
             try:
                 # Create Polygon from coordinates
                 polygon = Polygon(coords)
-                geometry = MultiPolygon(polygon)
+                if not polygon.is_valid:
+                    polygon = polygon.buffer(0)
+                geometry = polygon
+                polygon = polygon.simplify(0.00005, preserve_topology=True)
+
             except Exception as e:
                 logger.warning(f"Error creating geometry for OSM ID {osm_id}: {str(e)}")
                 return None

@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useOSMMutations, useOSMById } from '../../hooks/useOSM'
-import api from '../../services/api'
 
 type LayerType = 'buildings' | 'roads' | 'water' | 'green'
 
@@ -33,7 +32,8 @@ export default function OSMCRUD({ layerType, onFeatureSelect, onFeatureHighlight
     if (featureData && onFeatureSelect) {
       onFeatureSelect(featureData)
     }
-    if (selectedOsmId !== null && onFeatureHighlight) {
+    // FIX 5: Protect Cesium from highlight storms
+    if (typeof selectedOsmId === 'number' && selectedOsmId > 0 && onFeatureHighlight) {
       onFeatureHighlight(selectedOsmId)
     }
   }, [featureData, selectedOsmId, onFeatureSelect, onFeatureHighlight])
@@ -45,6 +45,16 @@ export default function OSMCRUD({ layerType, onFeatureSelect, onFeatureHighlight
     green: 'Green Spaces'
   }
 
+  // FIX 1: Smart invalidation helper - excludes bbox queries
+  const invalidateNonBboxQueries = () => {
+    queryClient.invalidateQueries({
+      predicate: (query) =>
+        query.queryKey[0] === 'osm' &&
+        query.queryKey[1] === layerType &&
+        query.queryKey[2] !== 'bbox'
+    })
+  }
+
   const handleCreate = async () => {
     setMessage('')
     try {
@@ -53,17 +63,18 @@ export default function OSMCRUD({ layerType, onFeatureSelect, onFeatureHighlight
         name: name || undefined,
         active,
         scenario_id: scenario,
+        // FIX 2: Use Bengaluru coordinates instead of (0,0)
         geom: {
           type: 'Polygon',
-          coordinates: [[[0, 0], [0.001, 0], [0.001, 0.001], [0, 0.001], [0, 0]]]
+          coordinates: [[[77.5946, 12.9716], [77.595, 12.9716], [77.595, 12.972], [77.5946, 12.972], [77.5946, 12.9716]]]
         }
       })
       setMessage(`✅ Created ${layerLabels[layerType]} successfully!`)
       const createdOsmId = response?.properties?.osm_id || parseInt(osmId) || Date.now()
       setOsmId('')
       setName('')
-      // Invalidate queries to refresh map
-      queryClient.invalidateQueries({ queryKey: ['osm', layerType] })
+      // FIX 1: Only invalidate non-bbox queries
+      invalidateNonBboxQueries()
       // Highlight the newly created feature
       setSelectedOsmId(createdOsmId)
     } catch (error: any) {
@@ -80,17 +91,31 @@ export default function OSMCRUD({ layerType, onFeatureSelect, onFeatureHighlight
     try {
       const id = parseInt(osmId)
       setSelectedOsmId(id) // This will trigger useOSMById hook
-      const response = await api.get(`/${layerType}/${id}/`)
-      const props = response.data.properties || response.data
+      
+      // FIX 3: Wait for useOSMById to load data, then use it
+      // The useEffect will handle the data when it arrives
+      // Remove duplicate api.get call
+      
+      setMessage(`✅ Loading ${layerLabels[layerType]}...`)
+      
+      // FIX 4: Do NOT invalidate queries on read/highlight
+      // Highlighting is visual only, no data refetch needed
+    } catch (error: any) {
+      setMessage(`❌ Error: ${error.message}`)
+      setSelectedOsmId(null)
+    }
+  }
+
+  // FIX 3: Use featureData from useOSMById hook to populate form
+  useEffect(() => {
+    if (featureData) {
+      const props = featureData.properties || featureData
       setName(props.name || '')
       setActive(props.active ?? true)
       setScenario(props.scenario_id || 'baseline')
       setMessage(`✅ Found ${layerLabels[layerType]}! Highlighting on map...`)
-    } catch (error: any) {
-      setMessage(`❌ Error: ${error.response?.data?.detail || 'Not found'}`)
-      setSelectedOsmId(null)
     }
-  }
+  }, [featureData, layerType])
   
   const handleClearHighlight = () => {
     setSelectedOsmId(null)
@@ -116,8 +141,8 @@ export default function OSMCRUD({ layerType, onFeatureSelect, onFeatureHighlight
         }
       })
       setMessage(`✅ Updated ${layerLabels[layerType]} successfully!`)
-      // Invalidate queries to refresh map
-      queryClient.invalidateQueries({ queryKey: ['osm', layerType] })
+      // FIX 1: Only invalidate non-bbox queries
+      invalidateNonBboxQueries()
     } catch (error: any) {
       setMessage(`❌ Error: ${error.response?.data?.error || error.message}`)
     }
@@ -137,8 +162,8 @@ export default function OSMCRUD({ layerType, onFeatureSelect, onFeatureHighlight
       setMessage(`✅ Deleted ${layerLabels[layerType]} successfully!`)
       setOsmId('')
       setName('')
-      // Invalidate queries to refresh map
-      queryClient.invalidateQueries({ queryKey: ['osm', layerType] })
+      // FIX 1: Only invalidate non-bbox queries
+      invalidateNonBboxQueries()
     } catch (error: any) {
       setMessage(`❌ Error: ${error.response?.data?.error || error.message}`)
     }

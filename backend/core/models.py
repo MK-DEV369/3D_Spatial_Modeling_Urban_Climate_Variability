@@ -24,11 +24,6 @@ class City(models.Model):
         return f"{self.name}, {self.country}"
 
 
-# Building model removed - use maps.models.BuildingsOSM instead
-# The BuildingsOSM model uses the buildings_osm table directly and supports
-# scenario-based rendering, active flags, and PostGIS geometry (SRID 3857)
-
-
 class ClimateData(models.Model):
     """
     Model for storing historical and predicted climate data.

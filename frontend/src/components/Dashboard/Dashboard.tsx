@@ -1,29 +1,42 @@
-
 import { useState, useEffect, useRef } from 'react'
-import { useCities, useCityClimate, useCityTraffic } from '../../hooks/useCities'
+import ErrorBoundary from './ErrorBoundary'
 import { useOSMByBBox } from '../../hooks/useOSM'
-import { MapContainer, TileLayer, GeoJSON, useMap, Rectangle, useMapEvents } from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
+import { PHYS } from '../../constants/phys'
+import { useWeather } from '../../hooks/useWeather'
+import { Viewer, GeoJsonDataSource, Entity, PolygonGraphics } from 'resium'
+import { Cartesian3, Color, CallbackProperty, ConstantProperty, ScreenSpaceEventHandler, ScreenSpaceEventType, defined } from 'cesium'
 import OSMCRUD from './OSMCRUD'
 
-// Component to handle map bounds changes and fetch OSM data
-function MapBoundsHandler({ 
-  onBoundsChange 
-}: { 
-  onBoundsChange: (bbox: { minLon: number; minLat: number; maxLon: number; maxLat: number }) => void 
+// Component to handle Cesium camera bounds changes and fetch OSM data
+function CesiumBoundsHandler({
+  onBoundsChange,
+  viewerRef
+}: {
+  onBoundsChange: (bbox: { minLon: number; minLat: number; maxLon: number; maxLat: number }) => void
+  viewerRef: React.MutableRefObject<any>
 }) {
-  const map = useMap()
-  const timeoutRef = useRef<number>()
+  const timeoutRef = useRef<NodeJS.Timeout | number>()
 
   useEffect(() => {
+    if (!viewerRef.current) return
+
     const updateBounds = () => {
-      const bounds = map.getBounds()
+      const viewer = viewerRef.current.cesiumElement
+      if (!viewer) return
+
+      const scene = viewer.scene
+      const ellipsoid = scene.globe.ellipsoid
+      const camera = viewer.camera
+
+      // Get camera view rectangle
+      const viewRectangle = camera.computeViewRectangle(ellipsoid)
+      if (!defined(viewRectangle)) return
+
       const bbox = {
-        minLon: bounds.getWest(),
-        minLat: bounds.getSouth(),
-        maxLon: bounds.getEast(),
-        maxLat: bounds.getNorth(),
+        minLon: viewRectangle.west * (180 / Math.PI),
+        minLat: viewRectangle.south * (180 / Math.PI),
+        maxLon: viewRectangle.east * (180 / Math.PI),
+        maxLat: viewRectangle.north * (180 / Math.PI),
       }
       onBoundsChange(bbox)
     }
@@ -31,84 +44,120 @@ function MapBoundsHandler({
     // Initial bounds
     updateBounds()
 
-    // Update bounds on move/zoom (debounced)
-    const handleMoveEnd = () => {
+    // Update bounds on camera change (debounced)
+    const handleCameraChange = () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current)
       timeoutRef.current = setTimeout(updateBounds, 500)
     }
 
-    map.on('moveend', handleMoveEnd)
-    map.on('zoomend', handleMoveEnd)
+    const viewer = viewerRef.current.cesiumElement
+    viewer.camera.changed.addEventListener(handleCameraChange)
 
     return () => {
-      map.off('moveend', handleMoveEnd)
-      map.off('zoomend', handleMoveEnd)
+      if (viewer) {
+        viewer.camera.changed.removeEventListener(handleCameraChange)
+      }
       if (timeoutRef.current) clearTimeout(timeoutRef.current)
     }
-  }, [map, onBoundsChange])
+  }, [onBoundsChange, viewerRef])
 
   return null
 }
 
-// Component for area selection (rectangle drawing)
-function AreaSelector({ 
-  isSelecting, 
-  onSelectionComplete 
-}: { 
+// Component for area selection (rectangle drawing) in Cesium
+function CesiumAreaSelector({
+  isSelecting,
+  onSelectionComplete,
+  viewerRef
+}: {
   isSelecting: boolean
-  onSelectionComplete: (bbox: { minLon: number; minLat: number; maxLon: number; maxLat: number }) => void 
+  onSelectionComplete: (bbox: { minLon: number; minLat: number; maxLon: number; maxLat: number }) => void
+  viewerRef: React.MutableRefObject<any>
 }) {
-  const [startPoint, setStartPoint] = useState<[number, number] | null>(null)
-  const [endPoint, setEndPoint] = useState<[number, number] | null>(null)
-  const map = useMap()
+  const [startPoint, setStartPoint] = useState<Cartesian3 | null>(null)
+  const [endPoint, setEndPoint] = useState<Cartesian3 | null>(null)
 
-  useMapEvents({
-    click(e) {
-      if (!isSelecting) return
-      
+  useEffect(() => {
+    if (!viewerRef.current || !isSelecting) return
+
+    const viewer = viewerRef.current.cesiumElement
+    if (!viewer) return
+
+    const handler = new ScreenSpaceEventHandler(viewer.scene.canvas)
+
+    handler.setInputAction((click: any) => {
+      const cartesian = viewer.camera.pickEllipsoid(click.position, viewer.scene.globe.ellipsoid)
+      if (!cartesian) return
+
       if (!startPoint) {
-        setStartPoint([e.latlng.lat, e.latlng.lng])
+        setStartPoint(cartesian)
       } else {
-        setEndPoint([e.latlng.lat, e.latlng.lng])
-        const minLat = Math.min(startPoint[0], e.latlng.lat)
-        const maxLat = Math.max(startPoint[0], e.latlng.lat)
-        const minLon = Math.min(startPoint[1], e.latlng.lng)
-        const maxLon = Math.max(startPoint[1], e.latlng.lng)
-        
+        setEndPoint(cartesian)
+
+        // Convert to lat/lon
+        const startCartographic = viewer.scene.globe.ellipsoid.cartesianToCartographic(startPoint)
+        const endCartographic = viewer.scene.globe.ellipsoid.cartesianToCartographic(cartesian)
+
+        const minLat = Math.min(startCartographic.latitude, endCartographic.latitude) * (180 / Math.PI)
+        const maxLat = Math.max(startCartographic.latitude, endCartographic.latitude) * (180 / Math.PI)
+        const minLon = Math.min(startCartographic.longitude, endCartographic.longitude) * (180 / Math.PI)
+        const maxLon = Math.max(startCartographic.longitude, endCartographic.longitude) * (180 / Math.PI)
+
         onSelectionComplete({ minLon, minLat, maxLon, maxLat })
         setStartPoint(null)
         setEndPoint(null)
       }
-    },
-    mousemove(e) {
-      if (isSelecting && startPoint && !endPoint) {
-        setEndPoint([e.latlng.lat, e.latlng.lng])
-      }
+    }, ScreenSpaceEventType.LEFT_CLICK)
+
+    return () => {
+      handler.destroy()
     }
-  })
+  }, [isSelecting, startPoint, onSelectionComplete, viewerRef])
 
-  if (!isSelecting || !startPoint) return null
+  if (!isSelecting || !startPoint || !endPoint) return null
 
-  const bounds = endPoint 
-    ? [[Math.min(startPoint[0], endPoint[0]), Math.min(startPoint[1], endPoint[1])], 
-       [Math.max(startPoint[0], endPoint[0]), Math.max(startPoint[1], endPoint[1])]]
-    : null
+  // Create rectangle entity for selection preview
+  const startCartographic = viewerRef.current?.cesiumElement?.scene?.globe?.ellipsoid?.cartesianToCartographic(startPoint)
+  const endCartographic = viewerRef.current?.cesiumElement?.scene?.globe?.ellipsoid?.cartesianToCartographic(endPoint)
 
-  return bounds ? (
-    <Rectangle
-      bounds={bounds as L.LatLngBoundsExpression}
-      pathOptions={{
-        color: '#ff0000',
-        weight: 2,
-        fillColor: '#ff0000',
-        fillOpacity: 0.2
-      }}
-    />
-  ) : null
+  if (!startCartographic || !endCartographic) return null
+
+  const minLat = Math.min(startCartographic.latitude, endCartographic.latitude) * (180 / Math.PI)
+  const maxLat = Math.max(startCartographic.latitude, endCartographic.latitude) * (180 / Math.PI)
+  const minLon = Math.min(startCartographic.longitude, endCartographic.longitude) * (180 / Math.PI)
+  const maxLon = Math.max(startCartographic.longitude, endCartographic.longitude) * (180 / Math.PI)
+
+  const rectangleHierarchy = new CallbackProperty(() => {
+    return {
+      positions: Cartesian3.fromDegreesArray([
+        minLon, minLat,
+        maxLon, minLat,
+        maxLon, maxLat,
+        minLon, maxLat
+      ])
+    }
+  }, false)
+
+  return (
+    <Entity>
+      <PolygonGraphics
+        hierarchy={rectangleHierarchy}
+        material={Color.RED.withAlpha(0.2)}
+        outline={true}
+        outlineColor={Color.RED}
+        outlineWidth={2}
+      />
+    </Entity>
+  )
 }
 
 export default function Dashboard() {
-  const [selectedCityId, setSelectedCityId] = useState<number | null>(null)
+    // Scenario parameters for physical meaning
+    const scenarioParams: Record<string, { treeFactor: number; heatFactor: number }> = {
+      baseline: { treeFactor: 1, heatFactor: 1 },
+      green: { treeFactor: 1.2, heatFactor: 0.85 },
+      heatwave: { treeFactor: 0.9, heatFactor: 1.2 },
+    }
   const [activeTab, setActiveTab] = useState<'weather' | 'traffic' | 'urban' | 'water' | 'buildings' | 'roads' | 'green'>('weather')
   const [isPanelOpen, setIsPanelOpen] = useState(true)
   const [mapBounds, setMapBounds] = useState<{ minLon: number; minLat: number; maxLon: number; maxLat: number } | null>(null)
@@ -117,47 +166,72 @@ export default function Dashboard() {
   const [showRoads, setShowRoads] = useState(false)
   const [showWater, setShowWater] = useState(false)
   const [showGreen, setShowGreen] = useState(false)
-  const [highlightedFeature, setHighlightedFeature] = useState<any>(null)
   const [highlightedOsmId, setHighlightedOsmId] = useState<number | null>(null)
   const [selectedArea, setSelectedArea] = useState<{ minLon: number; minLat: number; maxLon: number; maxLat: number } | null>(null)
   const [isSelectingArea, setIsSelectingArea] = useState(false)
   const [filterByArea, setFilterByArea] = useState(false)
 
-  const { data: cities } = useCities()
-  const { data: climateData } = useCityClimate(selectedCityId || 0)
-  const { data: trafficData } = useCityTraffic(selectedCityId || 0)
+  const viewerRef = useRef<any>(null)
+
+  // Hardcoded Bengaluru city
+  const bengaluru = { name: 'Bengaluru', country: 'India', latitude: 12.9716, longitude: 77.5946 }
+  // Mock trafficData for Bengaluru (replace with real hook if needed)
+  const trafficData = [{ congestion_level: 'Moderate', speed: 25.0 }];
+  const { data: weatherData, isLoading: weatherLoading } = useWeather(bengaluru.latitude, bengaluru.longitude)
 
   // Determine which bbox to use (selected area or map bounds)
   const activeBbox = filterByArea && selectedArea ? selectedArea : mapBounds
 
   // Fetch OSM data from backend based on map bounds or selected area
-  const { data: buildingsData, isLoading: buildingsLoading } = useOSMByBBox(
+  // Debugging: log bbox and overlay fetches
+  useEffect(() => {
+    if (activeBbox) {
+      console.debug('[Cesium] Active bbox:', activeBbox)
+    }
+  }, [activeBbox])
+
+  const { data: buildingsData, isLoading: buildingsLoading, error: buildingsError } = useOSMByBBox(
     'buildings',
     activeBbox,
     { scenario, active: true, enabled: showBuildings && !!activeBbox }
   )
+  useEffect(() => {
+    if (buildingsError) console.error('[OSM] Buildings fetch error:', buildingsError)
+    if (buildingsData) console.debug('[OSM] Buildings overlay loaded:', buildingsData)
+  }, [buildingsData, buildingsError])
 
-  const { data: roadsData, isLoading: roadsLoading } = useOSMByBBox(
+  const { data: roadsData, isLoading: roadsLoading, error: roadsError } = useOSMByBBox(
     'roads',
     activeBbox,
     { scenario, active: true, enabled: showRoads && !!activeBbox }
   )
+  useEffect(() => {
+    if (roadsError) console.error('[OSM] Roads fetch error:', roadsError)
+    if (roadsData) console.debug('[OSM] Roads overlay loaded:', roadsData)
+  }, [roadsData, roadsError])
 
-  const { data: waterData, isLoading: waterLoading } = useOSMByBBox(
+  const { data: waterData, isLoading: waterLoading, error: waterError } = useOSMByBBox(
     'water',
     activeBbox,
     { scenario, active: true, enabled: showWater && !!activeBbox }
   )
+  useEffect(() => {
+    if (waterError) console.error('[OSM] Water fetch error:', waterError)
+    if (waterData) console.debug('[OSM] Water overlay loaded:', waterData)
+  }, [waterData, waterError])
 
-  const { data: greenData, isLoading: greenLoading } = useOSMByBBox(
+  const { data: greenData, isLoading: greenLoading, error: greenError } = useOSMByBBox(
     'green',
     activeBbox,
     { scenario, active: true, enabled: showGreen && !!activeBbox }
   )
+  useEffect(() => {
+    if (greenError) console.error('[OSM] Green fetch error:', greenError)
+    if (greenData) console.debug('[OSM] Green overlay loaded:', greenData)
+  }, [greenData, greenError])
 
   // Handle feature selection from OSMCRUD
   const handleFeatureSelect = (feature: any) => {
-    setHighlightedFeature(feature)
     const osmId = feature.properties?.osm_id || feature.properties?.id
     if (osmId) {
       setHighlightedOsmId(osmId)
@@ -166,9 +240,6 @@ export default function Dashboard() {
 
   const handleFeatureHighlight = (osmId: number | null) => {
     setHighlightedOsmId(osmId)
-    if (!osmId) {
-      setHighlightedFeature(null)
-    }
   }
 
   const handleAreaSelection = (bbox: { minLon: number; minLat: number; maxLon: number; maxLat: number }) => {
@@ -177,133 +248,228 @@ export default function Dashboard() {
     setFilterByArea(true)
   }
 
-  const latestClimate = climateData?.[0]
+  // Removed unused latestClimate
   const latestTraffic = trafficData?.[0]
-  const selectedCity = cities?.find(city => city.id === selectedCityId)
+  // Removed duplicate selectedCity
 
   // Set initial map bounds when city is selected
   useEffect(() => {
-    if (selectedCity) {
-      // Set initial bounds around the city (approximate 10km radius)
-      const lat = selectedCity.latitude
-      const lon = selectedCity.longitude
-      const offset = 0.05 // ~5km
-      setMapBounds({
-        minLon: lon - offset,
-        minLat: lat - offset,
-        maxLon: lon + offset,
-        maxLat: lat + offset,
-      })
-    }
-  }, [selectedCity])
+    // Set initial bounds around Bengaluru (approximate 10km radius)
+    const lat = bengaluru.latitude
+    const lon = bengaluru.longitude
+    const offset = 0.05 // ~5km
+    setMapBounds({
+      minLon: lon - offset,
+      minLat: lat - offset,
+      maxLon: lon + offset,
+      maxLat: lat + offset,
+    })
+    console.debug('[Cesium] Initial city bounds set:', {
+      minLon: lon - offset,
+      minLat: lat - offset,
+      maxLon: lon + offset,
+      maxLat: lat + offset,
+    })
+  }, [])
 
+  // Maintain per-layer Cesium DataSource refs
+  const dataSourcesRef = useRef<Record<string, any>>({
+    buildings: null,
+    roads: null,
+    water: null,
+    green: null,
+  })
+
+  // Helper to add/update Cesium DataSource for a layer
+  const handleLayerLoad = (name: string, ds: any, viewer: any) => {
+    if (dataSourcesRef.current[name]) {
+      viewer.dataSources.remove(dataSourcesRef.current[name])
+    }
+    dataSourcesRef.current[name] = ds
+    viewer.dataSources.add(ds)
+  }
+
+  // Zoom-aware layer loading
+  const [cameraHeight, setCameraHeight] = useState<number>(1000000)
+  useEffect(() => {
+    const viewer = viewerRef.current?.cesiumElement
+    if (!viewer) return
+    const updateHeight = () => {
+      const height = viewer.camera.positionCartographic.height
+      setCameraHeight(height)
+      console.debug('[Cesium] Camera height:', height)
+    }
+    updateHeight()
+    viewer.camera.changed.addEventListener(updateHeight)
+    return () => {
+      viewer.camera.changed.removeEventListener(updateHeight)
+    }
+  }, [viewerRef])
+
+  // Layer load rules
+  const canLoadBuildings = cameraHeight < 50000
+  // Removed unused canLoadRoads
+  // Removed unused canLoadGreen
+  // Removed unused canLoadWater
 
   return (
     <div className="fixed inset-0 flex bg-gray-900">
       {/* Full-screen OSM Buildings & Roads Visualization */}
       <div className="flex-1 relative">
-        {selectedCity ? (
-          <div className="w-full h-full bg-gray-900">
-            <MapContainer
-              center={[selectedCity.latitude, selectedCity.longitude]}
-              zoom={13}
-              style={{ height: '100%', width: '100%', zIndex: 0 }}
-              key={`map-${selectedCity.id}`} // Force remount when city changes
+        <div className="w-full h-full bg-gray-900">
+          <ErrorBoundary>
+            {/* ...existing code for <Viewer> and its children... */}
+            <Viewer
+              ref={viewerRef}
+              style={{ height: '100%', width: '100%' }}
+              key={`viewer-bengaluru`}
+              baseLayerPicker={false}
+              geocoder={false}
+              homeButton={false}
+              sceneModePicker={false}
+              navigationHelpButton={false}
+              animation={false}
+              timeline={false}
+              fullscreenButton={false}
+              vrButton={false}
             >
-              <TileLayer
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                attribution="&copy; OpenStreetMap contributors"
-              />
-              <MapBoundsHandler onBoundsChange={setMapBounds} />
-              <AreaSelector 
-                isSelecting={isSelectingArea} 
+              {/* ...existing code for CesiumBoundsHandler, CesiumAreaSelector, and layers... */}
+              <CesiumBoundsHandler onBoundsChange={setMapBounds} viewerRef={viewerRef} />
+              <CesiumAreaSelector
+                isSelecting={isSelectingArea}
                 onSelectionComplete={handleAreaSelection}
+                viewerRef={viewerRef}
               />
-              
-              {/* Buildings Layer */}
-              {showBuildings && buildingsData && (
-                <GeoJSON 
-                  key={`buildings-${highlightedOsmId || 'all'}`}
-                  data={buildingsData} 
-                  style={(feature) => {
-                    const osmId = feature?.properties?.osm_id
-                    const isHighlighted = osmId === highlightedOsmId
-                    return {
-                      color: isHighlighted ? '#ff0000' : '#ff9800',
-                      weight: isHighlighted ? 3 : 1,
-                      fillOpacity: isHighlighted ? 0.8 : 0.4,
-                      fillColor: isHighlighted ? '#ff0000' : '#ff9800'
-                    }
-                  }}
-                />
-              )}
-              
-              {/* Roads Layer */}
-              {showRoads && roadsData && (
-                <GeoJSON 
-                  key={`roads-${highlightedOsmId || 'all'}`}
-                  data={roadsData} 
-                  style={(feature) => {
-                    const osmId = feature?.properties?.osm_id
-                    const isHighlighted = osmId === highlightedOsmId
-                    return {
-                      color: isHighlighted ? '#ff0000' : '#2196f3',
-                      weight: isHighlighted ? 4 : 2,
-                      opacity: isHighlighted ? 1 : 0.8
-                    }
-                  }}
-                />
-              )}
-              
-              {/* Water Layer */}
+              {/* ...existing code for layers and overlays... */}
+              {/* Water Layer (Base) */}
               {showWater && waterData && (
-                <GeoJSON 
-                  key={`water-${highlightedOsmId || 'all'}`}
-                  data={waterData} 
-                  style={(feature) => {
-                    const osmId = feature?.properties?.osm_id
-                    const isHighlighted = osmId === highlightedOsmId
-                    return {
-                      color: isHighlighted ? '#ff0000' : '#03a9f4',
-                      weight: isHighlighted ? 3 : 1,
-                      fillOpacity: isHighlighted ? 0.8 : 0.5,
-                      fillColor: isHighlighted ? '#ff0000' : '#03a9f4'
-                    }
+                <GeoJsonDataSource
+                  data={waterData}
+                  show={true}
+                  onLoad={(dataSource) => {
+                    const viewer = viewerRef.current?.cesiumElement
+                    if (viewer) handleLayerLoad('water', dataSource, viewer)
+                    const entities = dataSource.entities.values
+                    entities.forEach((entity) => {
+                      if (entity.polygon) {
+                        const osmId = entity.properties?.osm_id?.getValue()
+                        const isHighlighted = osmId === highlightedOsmId
+                        const materialProp = new CallbackProperty(() =>
+                          Color.fromCssColorString(isHighlighted ? '#ff0000' : '#03a9f4').withAlpha(isHighlighted ? 0.8 : 0.5), false) as any;
+                        (materialProp as any).getType = () => 'Color';
+                        entity.polygon.material = materialProp;
+                        entity.polygon.outlineColor = new CallbackProperty(() =>
+                          Color.fromCssColorString(isHighlighted ? '#ff0000' : '#03a9f4'), false)
+                        entity.polygon.outlineWidth = new CallbackProperty(() =>
+                          isHighlighted ? 3 : 1, false)
+                      }
+                    })
                   }}
                 />
               )}
-              
               {/* Green Spaces Layer */}
               {showGreen && greenData && (
-                <GeoJSON 
-                  key={`green-${highlightedOsmId || 'all'}`}
-                  data={greenData} 
-                  style={(feature) => {
-                    const osmId = feature?.properties?.osm_id
-                    const isHighlighted = osmId === highlightedOsmId
-                    return {
-                      color: isHighlighted ? '#ff0000' : '#4caf50',
-                      weight: isHighlighted ? 3 : 1,
-                      fillOpacity: isHighlighted ? 0.8 : 0.4,
-                      fillColor: isHighlighted ? '#ff0000' : '#4caf50'
-                    }
+                <GeoJsonDataSource
+                  data={greenData}
+                  show={true}
+                  onLoad={(dataSource) => {
+                    const viewer = viewerRef.current?.cesiumElement
+                    if (viewer) handleLayerLoad('green', dataSource, viewer)
+                    const entities = dataSource.entities.values
+                    entities.forEach((entity) => {
+                      if (entity.polygon) {
+                        const osmId = entity.properties?.osm_id?.getValue()
+                        const isHighlighted = osmId === highlightedOsmId
+                        const materialProp = new CallbackProperty(() =>
+                          Color.fromCssColorString(isHighlighted ? '#ff0000' : '#4caf50').withAlpha(
+                            (isHighlighted ? 0.8 : 0.4) * (scenarioParams[scenario]?.treeFactor ?? 1)
+                          ), false) as any;
+                        (materialProp as any).getType = () => 'Color';
+                        entity.polygon.material = materialProp;
+                        entity.polygon.outlineColor = new CallbackProperty(() =>
+                          Color.fromCssColorString(isHighlighted ? '#ff0000' : '#4caf50'), false)
+                        entity.polygon.outlineWidth = new CallbackProperty(() =>
+                          isHighlighted ? 3 : 1, false)
+                      }
+                    })
                   }}
                 />
               )}
-              
+              {/* Roads Layer */}
+              {showRoads && roadsData && (
+                <GeoJsonDataSource
+                  data={roadsData}
+                  show={true}
+                  onLoad={(dataSource) => {
+                    const viewer = viewerRef.current?.cesiumElement
+                    if (viewer) handleLayerLoad('roads', dataSource, viewer)
+                    const entities = dataSource.entities.values
+                    entities.forEach((entity) => {
+                      if (entity.polyline) {
+                        const osmId = entity.properties?.osm_id?.getValue()
+                        const isHighlighted = osmId === highlightedOsmId
+                        const materialProp = new CallbackProperty(() =>
+                          Color.fromCssColorString(isHighlighted ? '#ff0000' : '#2196f3').withAlpha(isHighlighted ? 1 : 0.8), false) as any;
+                        (materialProp as any).getType = () => 'Color';
+                        entity.polyline.material = materialProp;
+                        entity.polyline.width = new CallbackProperty(() =>
+                          isHighlighted ? 4 : 2, false)
+                      }
+                    })
+                  }}
+                />
+              )}
+              {/* Buildings Layer (Top) */}
+              {showBuildings && canLoadBuildings && buildingsData && (
+                <GeoJsonDataSource
+                  data={buildingsData}
+                  show={true}
+                  onLoad={(dataSource) => {
+                    const viewer = viewerRef.current?.cesiumElement
+                    if (viewer) handleLayerLoad('buildings', dataSource, viewer)
+                    const entities = dataSource.entities.values
+                    entities.forEach((entity) => {
+                      if (entity.polygon) {
+                        const osmId = entity.properties?.osm_id?.getValue() ?? 1;
+                        const isHighlighted = osmId === highlightedOsmId;
+                        // Use OSM building_levels if available, else fallback
+                        const levels = entity.properties?.building_levels?.getValue?.();
+                        const height = levels ? levels * PHYS.FLOOR_HEIGHT_M : PHYS.DEFAULT_BUILDING_HEIGHT_M;
+                        entity.polygon.extrudedHeight = new ConstantProperty(height);
+                        // Fix CallbackProperty getType error for material
+                        const materialProp = new CallbackProperty(() =>
+                          Color.fromCssColorString(isHighlighted ? '#ff0000' : '#ff9800').withAlpha(isHighlighted ? 0.8 : 0.4), false) as any;
+                        (materialProp as any).getType = () => 'Color';
+                        entity.polygon.material = materialProp;
+                        entity.polygon.outlineColor = new CallbackProperty(() =>
+                          Color.fromCssColorString(isHighlighted ? '#ff0000' : '#ff9800'), false);
+                        entity.polygon.outlineWidth = new CallbackProperty(() =>
+                          isHighlighted ? 3 : 1, false);
+                      }
+                    })
+                  }}
+                />
+              )}
               {/* Selected Area Rectangle */}
               {selectedArea && filterByArea && (
-                <Rectangle
-                  bounds={[[selectedArea.minLat, selectedArea.minLon], [selectedArea.maxLat, selectedArea.maxLon]]}
-                  pathOptions={{
-                    color: '#00ff00',
-                    weight: 2,
-                    fillColor: '#00ff00',
-                    fillOpacity: 0.1
-                  }}
-                />
+                <Entity>
+                  <PolygonGraphics
+                    hierarchy={Cartesian3.fromDegreesArray([
+                      selectedArea.minLon, selectedArea.minLat,
+                      selectedArea.maxLon, selectedArea.minLat,
+                      selectedArea.maxLon, selectedArea.maxLat,
+                      selectedArea.minLon, selectedArea.maxLat
+                    ])}
+                    material={Color.fromCssColorString('#00ff00').withAlpha(0.1)}
+                    outline={true}
+                    outlineColor={Color.fromCssColorString('#00ff00')}
+                    outlineWidth={2}
+                  />
+                </Entity>
               )}
-            </MapContainer>
+              {/* ...existing code for overlays... */}
+            </Viewer>
+          </ErrorBoundary>
             
             {/* Loading indicator */}
             {(buildingsLoading || roadsLoading || waterLoading || greenLoading) && (
@@ -312,14 +478,7 @@ export default function Dashboard() {
               </div>
             )}
           </div>
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gray-800">
-            <div className="text-center">
-              <div className="text-6xl mb-4"></div>
-              <p className="text-gray-400 text-xl">Select a city from the panel to view map</p>
-            </div>
-          </div>
-        )}
+        {/* No city selector fallback needed, always Bengaluru */}
         
         {/* Map Controls Overlay */}
         <div className="absolute top-4 left-4 bg-gray-800/95 backdrop-blur-sm rounded-lg p-3 border border-gray-700 shadow-lg z-10">
@@ -424,23 +583,7 @@ export default function Dashboard() {
           </div>
 
           {/* City Selector */}
-          <div className="p-4 border-b border-gray-700">
-            <label className="block text-sm font-medium mb-2 text-gray-300">
-              Select City
-            </label>
-            <select
-              value={selectedCityId || ''}
-              onChange={(e) => setSelectedCityId(Number(e.target.value))}
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">-- Select a city --</option>
-              {cities?.map((city) => (
-                <option key={city.id} value={city.id}>
-                  {city.name}, {city.country}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* City Selector removed, always Bengaluru */}
 
           {/* Feature Tabs */}
           <div className="border-b border-gray-700">
@@ -473,44 +616,100 @@ export default function Dashboard() {
           <div className="flex-1 overflow-y-auto p-4">
             {activeTab === 'weather' && (
               <div className="space-y-4">
-                <h3 className="text-lg font-semibold text-white mb-3">Weather Prediction & Simulation</h3>
-                
-                {latestClimate && (
+                <h3 className="text-lg font-semibold text-white mb-3">Current Weather</h3>
+
+                {weatherLoading ? (
                   <div className="bg-gray-700 rounded-lg p-4 border border-gray-600">
-                    <div className="text-3xl font-bold text-white mb-1">
-                      {latestClimate.temperature.toFixed(1)}°C
+                    <div className="text-sm text-gray-400">Loading weather data...</div>
+                  </div>
+                ) : weatherData ? (
+                  <div className="space-y-4">
+                    {/* Current Weather */}
+                    <div className="bg-gray-700 rounded-lg p-4 border border-gray-600">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-lg font-semibold text-white">
+                          {weatherData.location.name}, {weatherData.location.country}
+                        </div>
+                        <div className="text-sm text-gray-400">
+                          {new Date(weatherData.current.last_updated).toLocaleString()}
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-4">
+                        <img
+                          src={weatherData.current.condition.icon}
+                          alt={weatherData.current.condition.text}
+                          className="w-16 h-16"
+                        />
+                        <div>
+                          <div className="text-3xl font-bold text-white mb-1">
+                            {weatherData.current.temp_c}°C
+                          </div>
+                          <div className="text-sm text-gray-400">
+                            Feels like {weatherData.current.feelslike_c}°C
+                          </div>
+                          <div className="text-sm text-gray-300">
+                            {weatherData.current.condition.text}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 mt-4 text-sm">
+                        <div>
+                          <div className="text-gray-400">Humidity</div>
+                          <div className="text-white">{weatherData.current.humidity}% RH</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400">Wind</div>
+                          <div className="text-white">{weatherData.current.wind_kph} km/h {weatherData.current.wind_dir}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400">Pressure</div>
+                          <div className="text-white">{weatherData.current.pressure_mb} mb</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400">Visibility</div>
+                          <div className="text-white">{weatherData.current.vis_km} km</div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-sm text-gray-400">
-                      Humidity: {latestClimate.humidity?.toFixed(1) || 'N/A'}%
+
+                    {/* Forecast Preview */}
+                    <div className="bg-gray-700/50 rounded p-3">
+                      <div className="font-semibold mb-2 text-white">7-Day Forecast</div>
+                      <div className="text-sm text-gray-300">
+                        Forecast data available - select timeframe to view detailed predictions
+                      </div>
                     </div>
+
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-sm text-gray-400 mb-2">View Forecast</label>
+                        <select className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white">
+                          <option>Next 24 Hours</option>
+                          <option>Next 7 Days</option>
+                          <option>Next 14 Days</option>
+                        </select>
+                      </div>
+
+                      <button className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white font-medium transition-colors">
+                        Load Forecast Data
+                      </button>
+
+                      <div className="bg-gray-700/50 rounded p-3 text-sm text-gray-300">
+                        <div className="font-semibold mb-2">Weather Factors:</div>
+                        <div className="space-y-1">
+                          <div>• Temperature variations</div>
+                          <div>• Precipitation forecasts</div>
+                          <div>• Wind patterns</div>
+                          <div>• Air quality monitoring</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-gray-700 rounded-lg p-4 border border-gray-600">
+                    <div className="text-sm text-gray-400">No weather data available</div>
                   </div>
                 )}
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-2">Prediction Timeframe</label>
-                    <select className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white">
-                      <option>Next 24 Hours</option>
-                      <option>Next 7 Days</option>
-                      <option>Next 30 Days</option>
-                      <option>Next 3 Months</option>
-                    </select>
-                  </div>
-
-                  <button className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white font-medium transition-colors">
-                    Run Weather Simulation
-                  </button>
-
-                  <div className="bg-gray-700/50 rounded p-3 text-sm text-gray-300">
-                    <div className="font-semibold mb-2">Climate Factors:</div>
-                    <div className="space-y-1">
-                      <div>• Temperature trends</div>
-                      <div>• Precipitation patterns</div>
-                      <div>• Wind speed & direction</div>
-                      <div>• Air quality index</div>
-                    </div>
-                  </div>
-                </div>
               </div>
             )}
 
@@ -526,6 +725,7 @@ export default function Dashboard() {
                     <div className="text-sm text-gray-400">
                       Speed: {latestTraffic.speed?.toFixed(1) || 'N/A'} km/h
                     </div>
+                    {/* Units: km/h, congestion_level: qualitative */}
                   </div>
                 )}
 

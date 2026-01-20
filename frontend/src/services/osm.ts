@@ -21,7 +21,7 @@ export interface OSMFeature {
     active: boolean
     scenario_id: string
     modified_at: string
-    [key: string]: any // Additional properties vary by layer type
+    [key: string]: any
   }
 }
 
@@ -42,20 +42,22 @@ export const osmApi = {
       active?: boolean
     }
   ): Promise<GeoJSONCollection> => {
-    const params = new URLSearchParams({
+    // Construct params object for Axios
+    const params: Record<string, string> = {
       bbox: `${bbox.minLon},${bbox.minLat},${bbox.maxLon},${bbox.maxLat}`,
-    })
-    
+    };
+
     if (options?.scenario) {
-      params.append('scenario', options.scenario)
-    }
-    
-    if (options?.active !== undefined) {
-      params.append('active', options.active.toString())
+      params.scenario = options.scenario;
     }
 
-    const response = await api.get(`/${layerType}/bbox/?${params.toString()}`)
-    return response.data
+    if (options?.active !== undefined) {
+      params.active = options.active.toString();
+    }
+
+    // Let Axios handle the query string serialization
+    const response = await api.get(`/${layerType}/bbox/`, { params });
+    return response.data;
   },
 
   /**
@@ -68,46 +70,44 @@ export const osmApi = {
       active?: boolean
     }
   ): Promise<GeoJSONCollection> => {
-    const params = new URLSearchParams()
-    
+    const params: Record<string, string> = {};
+
     if (options?.scenario) {
-      params.append('scenario', options.scenario)
-    }
-    
-    if (options?.active !== undefined) {
-      params.append('active', options.active.toString())
+      params.scenario = options.scenario;
     }
 
-    const queryString = params.toString()
-    const url = `/${layerType}/${queryString ? `?${queryString}` : ''}`
-    const response = await api.get(url)
-    
+    if (options?.active !== undefined) {
+      params.active = options.active.toString();
+    }
+
+    const response = await api.get(`/${layerType}/`, { params });
+
     // Handle DRF paginated response or direct FeatureCollection
     if (response.data.type === 'FeatureCollection') {
-      return response.data
+      return response.data;
     }
-    
+
     // If paginated, extract features
     if (response.data.results) {
       return {
         type: 'FeatureCollection',
         features: response.data.results.map((item: any) => ({
           type: 'Feature',
-          geometry: item.geometry,
-          properties: item.properties || item,
+          geometry: item.geometry, // Ensure backend provides this
+          properties: item.properties || item, // Handle nested or flat properties
         })),
-      }
+      };
     }
-    
-    return response.data
+
+    return response.data;
   },
 
   /**
    * Get single OSM feature by ID
    */
   getById: async (layerType: LayerType, osmId: number): Promise<OSMFeature> => {
-    const response = await api.get(`/${layerType}/${osmId}/`)
-    return response.data
+    const response = await api.get(`/${layerType}/${osmId}/`);
+    return response.data;
   },
 
   /**
@@ -117,8 +117,8 @@ export const osmApi = {
     const response = await api.post(`/${layerType}/`, {
       ...data,
       modified_at: new Date().toISOString(),
-    })
-    return response.data
+    });
+    return response.data;
   },
 
   /**
@@ -132,14 +132,14 @@ export const osmApi = {
     const response = await api.patch(`/${layerType}/${osmId}/`, {
       ...data,
       modified_at: new Date().toISOString(),
-    })
-    return response.data
+    });
+    return response.data;
   },
 
   /**
    * Delete OSM feature
    */
   delete: async (layerType: LayerType, osmId: number): Promise<void> => {
-    await api.delete(`/${layerType}/${osmId}/`)
+    await api.delete(`/${layerType}/${osmId}/`);
   },
 }

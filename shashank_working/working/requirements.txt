@@ -1,0 +1,7 @@
+flask
+flask-cors
+networkx
+scipy
+pickle
+numpy
+pandas

@@ -7,6 +7,7 @@ import { osmApi, LayerType, BBox, GeoJSONCollection } from '../services/osm'
  */
 export function useOSMByBBox(
   layerType: LayerType,
+  
   bbox: BBox | null,
   options?: {
     scenario?: string
@@ -14,14 +15,18 @@ export function useOSMByBBox(
     enabled?: boolean
   }
 ) {
+  const bboxKey = bbox ? `${bbox.minLon},${bbox.minLat},${bbox.maxLon},${bbox.maxLat}` : null;
   return useQuery<GeoJSONCollection>({
-    queryKey: ['osm', layerType, 'bbox', bbox, options?.scenario, options?.active],
+    
+    queryKey: ['osm', layerType, 'bbox', bboxKey, options?.scenario, options?.active],
     queryFn: () => {
       if (!bbox) throw new Error('BBox is required')
       return osmApi.getByBBox(layerType, bbox, options)
     },
     enabled: !!bbox && (options?.enabled !== false),
-    staleTime: 30000, // 30 seconds
+    staleTime: 60000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
 }
 
@@ -40,6 +45,9 @@ export function useOSMAll(
     queryKey: ['osm', layerType, 'all', options?.scenario, options?.active],
     queryFn: () => osmApi.getAll(layerType, options),
     enabled: options?.enabled !== false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+
   })
 }
 

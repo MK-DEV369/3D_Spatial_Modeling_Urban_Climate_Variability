@@ -10,6 +10,5 @@ router.register(r'predictions', views.PredictionViewSet, basename='prediction')
 urlpatterns = [
     path('', views.api_root, name='api-root'),  # Custom API root
     path('', include(router.urls)),
-    # OSM layer endpoints moved to maps app: /api/buildings/, /api/roads/, /api/water/, /api/green/
 ]
 
